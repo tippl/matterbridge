@@ -160,33 +160,28 @@ func (b *Bslack) Disconnect() error {
 	return b.rtm.Disconnect()
 }
 
-// JoinChannel only acts as a verification method that checks whether Matterbridge's
-// Slack integration is already member of the channel. This is because Slack does not
-// allow apps or bots to join channels themselves and they need to be invited
-// manually by a user.
+// There is a separate OAUTH scope to join channels programmatically.
+// If you have not added `channels:join` then the bot will need to be added manually.
 func (b *Bslack) JoinChannel(channel config.ChannelInfo) error {
 	// We can only join a channel through the Slack API.
 	if b.sc == nil {
 		return nil
 	}
 
-	// try to join a channel when in legacy
-	if b.legacy {
-		_, _, _, err := b.sc.JoinConversation(channel.Name)
-		if err != nil {
-			switch err.Error() {
-			case "name_taken", "restricted_action":
-			case "default":
-				return err
-			}
-		}
-	}
-
 	b.channels.populateChannels(false)
 
 	channelInfo, err := b.channels.getChannel(channel.Name)
 	if err != nil {
-		return fmt.Errorf("could not join channel: %#v", err)
+		return fmt.Errorf("could not find channel: %#v", err)
+	}
+
+	// we can join a channel if we have `channels:join` scope
+	if !channelInfo.IsMember {
+		// try to join the channel
+		_, _, _, err := b.sc.JoinConversation(channelInfo.ID)
+		if err != nil {
+			return fmt.Errorf("the slack integration is not member of channel '%s' (and cannot join by ID: %s), please add it manually. %s", channelInfo.Name, channelInfo.ID, err)
+		}
 	}
 
 	if strings.HasPrefix(channel.Name, "ID:") {
@@ -194,10 +189,6 @@ func (b *Bslack) JoinChannel(channel config.ChannelInfo) error {
 		channel.Name = channelInfo.Name
 	}
 
-	// we can't join a channel unless we are using legacy tokens #651
-	if !channelInfo.IsMember && !b.legacy {
-		return fmt.Errorf("slack integration that matterbridge is using is not member of channel '%s', please add it manually", channelInfo.Name)
-	}
 	return nil
 }
 
